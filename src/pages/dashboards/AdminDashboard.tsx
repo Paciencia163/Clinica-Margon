@@ -10,16 +10,31 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Plus, Edit, Trash2, Users, Stethoscope, Calendar, MapPin } from "lucide-react";
+import { Loader2, Plus, Edit, Trash2, Users, Stethoscope, Calendar, MapPin, Clock } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { formatAOA } from "@/lib/format";
+import { PhotoUpload } from "@/components/PhotoUpload";
 
 interface Experience { name: string; url?: string; description?: string; }
+interface AvailBlock { id?: string; day_of_week: number; start_time: string; end_time: string; slot_minutes: number; }
 interface Doctor { id: string; full_name: string; specialty: string; bio: string | null; years_experience: number | null; photo_url: string | null; consultation_price: number | null; active: boolean; user_id: string | null; experiences?: Experience[] | null; }
 interface Location { id: string; name: string; provincia: string; municipio: string; bairro: string | null; endereco: string; phone: string | null; whatsapp: string | null; email: string | null; maps_url: string | null; opening_hours: string | null; is_main: boolean; active: boolean; }
 
-const empty = { full_name: "", specialty: "", bio: "", years_experience: 0, photo_url: "", consultation_price: 0, user_email: "", experiences: [] as Experience[] };
+const DAYS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+const defaultAvail: AvailBlock[] = [
+  { day_of_week: 1, start_time: "08:00", end_time: "12:00", slot_minutes: 30 },
+  { day_of_week: 2, start_time: "08:00", end_time: "12:00", slot_minutes: 30 },
+  { day_of_week: 3, start_time: "08:00", end_time: "12:00", slot_minutes: 30 },
+  { day_of_week: 4, start_time: "08:00", end_time: "12:00", slot_minutes: 30 },
+  { day_of_week: 5, start_time: "08:00", end_time: "12:00", slot_minutes: 30 },
+];
+
+const empty = {
+  email: "", password: "", phone: "",
+  full_name: "", specialty: "", bio: "", years_experience: 0, photo_url: "",
+  consultation_price: 0, experiences: [] as Experience[], availability: defaultAvail,
+};
 const emptyLoc = { name: "", provincia: "Huíla", municipio: "Lubango", bairro: "", endereco: "", phone: "", whatsapp: "", email: "", maps_url: "", opening_hours: "", is_main: false };
 
 const AdminDashboard = () => {
@@ -30,6 +45,13 @@ const AdminDashboard = () => {
   const [editing, setEditing] = useState<Doctor | null>(null);
   const [dialog, setDialog] = useState(false);
   const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
+
+  // Availability management for existing doctors
+  const [agendaDoctor, setAgendaDoctor] = useState<Doctor | null>(null);
+  const [agendaBlocks, setAgendaBlocks] = useState<AvailBlock[]>([]);
+  const [newBlock, setNewBlock] = useState<AvailBlock>({ day_of_week: 1, start_time: "09:00", end_time: "12:00", slot_minutes: 30 });
+
   const [editingLoc, setEditingLoc] = useState<Location | null>(null);
   const [locDialog, setLocDialog] = useState(false);
   const [locForm, setLocForm] = useState(emptyLoc);
@@ -48,35 +70,55 @@ const AdminDashboard = () => {
 
   useEffect(() => { load(); }, []);
 
-  const openNew = () => { setEditing(null); setForm(empty); setDialog(true); };
+  const openNew = () => { setEditing(null); setForm({ ...empty, availability: defaultAvail.map((b) => ({ ...b })) }); setDialog(true); };
   const openEdit = (d: Doctor) => {
     setEditing(d);
-    setForm({ full_name: d.full_name, specialty: d.specialty, bio: d.bio ?? "", years_experience: d.years_experience ?? 0, photo_url: d.photo_url ?? "", consultation_price: Number(d.consultation_price ?? 0), user_email: "", experiences: (d.experiences as Experience[]) ?? [] });
+    setForm({
+      email: "", password: "", phone: "",
+      full_name: d.full_name, specialty: d.specialty, bio: d.bio ?? "",
+      years_experience: d.years_experience ?? 0, photo_url: d.photo_url ?? "",
+      consultation_price: Number(d.consultation_price ?? 0),
+      experiences: (d.experiences as Experience[]) ?? [],
+      availability: [],
+    });
     setDialog(true);
   };
 
   const save = async () => {
-    if (!form.full_name || !form.specialty) return toast.error("Nome e especialidade obrigatórios");
-    const payload: any = {
-      full_name: form.full_name,
-      specialty: form.specialty,
-      bio: form.bio || null,
-      years_experience: form.years_experience,
-      photo_url: form.photo_url || null,
-      consultation_price: form.consultation_price,
-      experiences: form.experiences.filter((e) => e.name?.trim()),
-    };
-    if (editing) {
-      const { error } = await supabase.from("doctors").update(payload).eq("id", editing.id);
-      if (error) return toast.error(error.message);
-      toast.success("Médico atualizado");
-    } else {
-      const { error } = await supabase.from("doctors").insert(payload);
-      if (error) return toast.error(error.message);
-      toast.success("Médico criado");
-    }
-    setDialog(false);
-    load();
+    if (!form.full_name || !form.specialty) return toast.error("Nome e especialidade são obrigatórios");
+    setSaving(true);
+    try {
+      if (editing) {
+        const payload = {
+          full_name: form.full_name, specialty: form.specialty, bio: form.bio || null,
+          years_experience: form.years_experience, photo_url: form.photo_url || null,
+          consultation_price: form.consultation_price,
+          experiences: form.experiences.filter((e) => e.name?.trim()) as any,
+        };
+        const { error } = await supabase.from("doctors").update(payload).eq("id", editing.id);
+        if (error) throw error;
+        toast.success("Médico atualizado");
+      } else {
+        if (!form.email || !form.password) { toast.error("Email e palavra-passe obrigatórios"); setSaving(false); return; }
+        if (form.password.length < 8) { toast.error("Palavra-passe mínimo 8 caracteres"); setSaving(false); return; }
+        const { data, error } = await supabase.functions.invoke("admin-create-doctor", {
+          body: {
+            email: form.email, password: form.password, phone: form.phone || null,
+            full_name: form.full_name, specialty: form.specialty, bio: form.bio || null,
+            years_experience: form.years_experience, photo_url: form.photo_url || null,
+            consultation_price: form.consultation_price,
+            experiences: form.experiences.filter((e) => e.name?.trim()),
+            availability: form.availability.filter((a) => a.start_time && a.end_time),
+          },
+        });
+        if (error || (data as any)?.error) throw new Error((data as any)?.error ?? error?.message);
+        toast.success("Médico criado — pode entrar com as credenciais fornecidas");
+      }
+      setDialog(false);
+      load();
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao guardar");
+    } finally { setSaving(false); }
   };
 
   const remove = async (id: string) => {
@@ -92,45 +134,50 @@ const AdminDashboard = () => {
     load();
   };
 
+  // ===== Agenda management =====
+  const openAgenda = async (d: Doctor) => {
+    setAgendaDoctor(d);
+    const { data } = await supabase.from("availability").select("*").eq("doctor_id", d.id).order("day_of_week").order("start_time");
+    setAgendaBlocks((data as any) ?? []);
+  };
+  const addBlock = async () => {
+    if (!agendaDoctor) return;
+    const { error } = await supabase.from("availability").insert({ ...newBlock, doctor_id: agendaDoctor.id });
+    if (error) return toast.error(error.message);
+    toast.success("Bloco adicionado");
+    openAgenda(agendaDoctor);
+  };
+  const removeBlock = async (id: string) => {
+    await supabase.from("availability").delete().eq("id", id);
+    if (agendaDoctor) openAgenda(agendaDoctor);
+  };
+
+  // ===== Locations =====
   const openNewLoc = () => { setEditingLoc(null); setLocForm(emptyLoc); setLocDialog(true); };
   const openEditLoc = (l: Location) => {
     setEditingLoc(l);
-    setLocForm({
-      name: l.name, provincia: l.provincia, municipio: l.municipio, bairro: l.bairro ?? "",
-      endereco: l.endereco, phone: l.phone ?? "", whatsapp: l.whatsapp ?? "", email: l.email ?? "",
-      maps_url: l.maps_url ?? "", opening_hours: l.opening_hours ?? "", is_main: l.is_main,
-    });
+    setLocForm({ name: l.name, provincia: l.provincia, municipio: l.municipio, bairro: l.bairro ?? "", endereco: l.endereco, phone: l.phone ?? "", whatsapp: l.whatsapp ?? "", email: l.email ?? "", maps_url: l.maps_url ?? "", opening_hours: l.opening_hours ?? "", is_main: l.is_main });
     setLocDialog(true);
   };
   const saveLoc = async () => {
     if (!locForm.name || !locForm.endereco) return toast.error("Nome e endereço obrigatórios");
-    const payload: any = {
-      ...locForm,
-      bairro: locForm.bairro || null,
-      phone: locForm.phone || null,
-      whatsapp: locForm.whatsapp || null,
-      email: locForm.email || null,
-      maps_url: locForm.maps_url || null,
-      opening_hours: locForm.opening_hours || null,
-    };
+    const payload: any = { ...locForm, bairro: locForm.bairro || null, phone: locForm.phone || null, whatsapp: locForm.whatsapp || null, email: locForm.email || null, maps_url: locForm.maps_url || null, opening_hours: locForm.opening_hours || null };
     const { error } = editingLoc
       ? await supabase.from("clinic_locations").update(payload).eq("id", editingLoc.id)
       : await supabase.from("clinic_locations").insert(payload);
     if (error) return toast.error(error.message);
     toast.success(editingLoc ? "Local atualizado" : "Local criado");
-    setLocDialog(false);
-    load();
+    setLocDialog(false); load();
   };
   const removeLoc = async (id: string) => {
     if (!confirm("Remover este local?")) return;
     const { error } = await supabase.from("clinic_locations").delete().eq("id", id);
     if (error) return toast.error(error.message);
-    toast.success("Removido");
-    load();
+    toast.success("Removido"); load();
   };
 
   return (
-    <DashboardLayout title="Administração" subtitle="Gerencie médicos, locais e consultas da clínica">
+    <DashboardLayout title="Administração" subtitle="Gerencie médicos, agenda, locais e consultas">
       <div className="grid md:grid-cols-4 gap-4 mb-8">
         <Card className="p-5 flex items-center gap-4"><Stethoscope className="h-10 w-10 text-secondary" /><div><p className="text-sm text-muted-foreground">Médicos</p><p className="text-2xl font-display font-bold">{doctors.length}</p></div></Card>
         <Card className="p-5 flex items-center gap-4"><Calendar className="h-10 w-10 text-secondary" /><div><p className="text-sm text-muted-foreground">Consultas</p><p className="text-2xl font-display font-bold">{appts.length}</p></div></Card>
@@ -149,33 +196,71 @@ const AdminDashboard = () => {
           <div className="flex justify-end">
             <Dialog open={dialog} onOpenChange={setDialog}>
               <DialogTrigger asChild><Button variant="hero" onClick={openNew}><Plus className="h-4 w-4" /> Novo médico</Button></DialogTrigger>
-              <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-                <DialogHeader><DialogTitle>{editing ? "Editar médico" : "Novo médico"}</DialogTitle></DialogHeader>
-                <div className="space-y-3">
-                  <div><Label>Nome completo *</Label><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></div>
-                  <div><Label>Especialidade *</Label><Input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} /></div>
-                  <div><Label>Foto (URL)</Label><Input value={form.photo_url} onChange={(e) => setForm({ ...form, photo_url: e.target.value })} placeholder="https://…" /></div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Anos experiência</Label><Input type="number" value={form.years_experience} onChange={(e) => setForm({ ...form, years_experience: +e.target.value })} /></div>
-                    <div><Label>Preço (Kz / AOA)</Label><Input type="number" step="1" value={form.consultation_price} onChange={(e) => setForm({ ...form, consultation_price: +e.target.value })} /></div>
-                  </div>
-                  <div><Label>Bio / experiência</Label><Textarea rows={3} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></div>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader><DialogTitle>{editing ? "Editar médico" : "Novo médico (com acesso)"}</DialogTitle></DialogHeader>
+                <div className="space-y-4">
+                  {/* Photo */}
+                  <PhotoUpload
+                    value={form.photo_url || null}
+                    onChange={(url) => setForm({ ...form, photo_url: url ?? "" })}
+                    folder="doctor"
+                    fallback={form.full_name.split(" ").map((n) => n[0]).slice(0, 2).join("") || "Dr"}
+                    asAdmin
+                  />
 
-                  <div className="space-y-2 pt-2 border-t border-border/40">
+                  {!editing && (
+                    <div className="grid grid-cols-2 gap-3 p-4 bg-secondary/5 rounded-md border border-secondary/20">
+                      <div className="col-span-2 text-xs font-semibold text-secondary uppercase tracking-wider">Credenciais de acesso</div>
+                      <div><Label>Email profissional *</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="dr.silva@clinicamargon.ao" /></div>
+                      <div><Label>Palavra-passe (mín 8) *</Label><Input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="•••••••" /></div>
+                      <div className="col-span-2"><Label>Telefone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+244…" /></div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2"><Label>Nome completo *</Label><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></div>
+                    <div><Label>Especialidade *</Label><Input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} /></div>
+                    <div><Label>Anos de experiência</Label><Input type="number" value={form.years_experience} onChange={(e) => setForm({ ...form, years_experience: +e.target.value })} /></div>
+                    <div className="col-span-2"><Label>Preço da consulta (Kz / AOA)</Label><Input type="number" step="1" value={form.consultation_price} onChange={(e) => setForm({ ...form, consultation_price: +e.target.value })} /></div>
+                  </div>
+
+                  <div><Label>Bio</Label><Textarea rows={3} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></div>
+
+                  {!editing && (
+                    <div className="space-y-2 pt-3 border-t border-border/40">
+                      <div className="flex items-center justify-between">
+                        <Label className="flex items-center gap-2"><Clock className="h-4 w-4" /> Horário de trabalho semanal</Label>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setForm({ ...form, availability: [...form.availability, { day_of_week: 1, start_time: "08:00", end_time: "12:00", slot_minutes: 30 }] })}>
+                          <Plus className="h-3 w-3" /> Adicionar bloco
+                        </Button>
+                      </div>
+                      {form.availability.length === 0 && <p className="text-xs text-muted-foreground">Sem horário. Pode definir mais tarde em “Gerir agenda”.</p>}
+                      {form.availability.map((a, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center">
+                          <select className="h-9 px-2 rounded-md border border-input bg-background text-sm" value={a.day_of_week} onChange={(e) => { const arr = [...form.availability]; arr[i] = { ...arr[i], day_of_week: +e.target.value }; setForm({ ...form, availability: arr }); }}>
+                            {DAYS.map((d, idx) => <option key={idx} value={idx}>{d}</option>)}
+                          </select>
+                          <Input className="h-9 w-28" type="time" value={a.start_time} onChange={(e) => { const arr = [...form.availability]; arr[i] = { ...arr[i], start_time: e.target.value }; setForm({ ...form, availability: arr }); }} />
+                          <Input className="h-9 w-28" type="time" value={a.end_time} onChange={(e) => { const arr = [...form.availability]; arr[i] = { ...arr[i], end_time: e.target.value }; setForm({ ...form, availability: arr }); }} />
+                          <Input className="h-9 w-20" type="number" value={a.slot_minutes} onChange={(e) => { const arr = [...form.availability]; arr[i] = { ...arr[i], slot_minutes: +e.target.value }; setForm({ ...form, availability: arr }); }} title="Duração da consulta (min)" />
+                          <Button type="button" variant="ghost" size="icon" onClick={() => setForm({ ...form, availability: form.availability.filter((_, j) => j !== i) })}><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="space-y-2 pt-3 border-t border-border/40">
                     <div className="flex items-center justify-between">
                       <Label>Experiência e instituições</Label>
                       <Button type="button" size="sm" variant="ghost" onClick={() => setForm({ ...form, experiences: [...form.experiences, { name: "", url: "", description: "" }] })}>
                         <Plus className="h-3 w-3" /> Adicionar
                       </Button>
                     </div>
-                    {form.experiences.length === 0 && <p className="text-xs text-muted-foreground">Nenhuma instituição. Adicione hospitais, clínicas ou universidades.</p>}
                     {form.experiences.map((exp, i) => (
                       <div key={i} className="grid gap-2 p-3 rounded-md border border-border/40 bg-muted/30">
                         <div className="flex gap-2">
                           <Input placeholder="Nome (ex: Hospital Central do Lubango)" value={exp.name} onChange={(e) => { const arr = [...form.experiences]; arr[i] = { ...arr[i], name: e.target.value }; setForm({ ...form, experiences: arr }); }} />
-                          <Button type="button" variant="ghost" size="icon" onClick={() => setForm({ ...form, experiences: form.experiences.filter((_, j) => j !== i) })}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <Button type="button" variant="ghost" size="icon" onClick={() => setForm({ ...form, experiences: form.experiences.filter((_, j) => j !== i) })}><Trash2 className="h-4 w-4" /></Button>
                         </div>
                         <Input placeholder="Link (opcional)" value={exp.url ?? ""} onChange={(e) => { const arr = [...form.experiences]; arr[i] = { ...arr[i], url: e.target.value }; setForm({ ...form, experiences: arr }); }} />
                         <Input placeholder="Descrição curta (opcional)" value={exp.description ?? ""} onChange={(e) => { const arr = [...form.experiences]; arr[i] = { ...arr[i], description: e.target.value }; setForm({ ...form, experiences: arr }); }} />
@@ -183,7 +268,9 @@ const AdminDashboard = () => {
                     ))}
                   </div>
 
-                  <Button variant="hero" className="w-full" onClick={save}>Guardar</Button>
+                  <Button variant="hero" className="w-full" onClick={save} disabled={saving}>
+                    {saving && <Loader2 className="h-4 w-4 animate-spin" />} Guardar
+                  </Button>
                 </div>
               </DialogContent>
             </Dialog>
@@ -194,9 +281,13 @@ const AdminDashboard = () => {
           ) : doctors.map((d) => (
             <Card key={d.id} className="p-5 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-full gradient-primary flex items-center justify-center text-primary-foreground font-bold">
-                  {d.full_name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
-                </div>
+                {d.photo_url ? (
+                  <img src={d.photo_url} alt={d.full_name} className="h-12 w-12 rounded-full object-cover ring-2 ring-border" />
+                ) : (
+                  <div className="h-12 w-12 rounded-full gradient-primary flex items-center justify-center text-primary-foreground font-bold">
+                    {d.full_name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                  </div>
+                )}
                 <div>
                   <p className="font-semibold">{d.full_name}</p>
                   <p className="text-sm text-muted-foreground">{d.specialty} {d.years_experience ? `· ${d.years_experience} anos` : ""} {d.consultation_price ? `· ${formatAOA(d.consultation_price)}` : ""}</p>
@@ -204,11 +295,41 @@ const AdminDashboard = () => {
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={d.active ? "default" : "outline"} className="cursor-pointer" onClick={() => toggleActive(d)}>{d.active ? "Ativo" : "Inativo"}</Badge>
+                <Button size="sm" variant="ghost" onClick={() => openAgenda(d)}><Clock className="h-4 w-4" /> Agenda</Button>
                 <Button size="sm" variant="ghost" onClick={() => openEdit(d)}><Edit className="h-4 w-4" /></Button>
                 <Button size="sm" variant="ghost" onClick={() => remove(d.id)}><Trash2 className="h-4 w-4" /></Button>
               </div>
             </Card>
           ))}
+
+          {/* Agenda dialog */}
+          <Dialog open={!!agendaDoctor} onOpenChange={(o) => !o && setAgendaDoctor(null)}>
+            <DialogContent className="max-w-xl">
+              <DialogHeader><DialogTitle>Agenda · {agendaDoctor?.full_name}</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-end p-3 bg-muted/40 rounded-md">
+                  <div>
+                    <Label className="text-xs">Dia</Label>
+                    <select className="h-9 w-full px-2 rounded-md border border-input bg-background text-sm" value={newBlock.day_of_week} onChange={(e) => setNewBlock({ ...newBlock, day_of_week: +e.target.value })}>
+                      {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div><Label className="text-xs">Início</Label><Input className="h-9 w-28" type="time" value={newBlock.start_time} onChange={(e) => setNewBlock({ ...newBlock, start_time: e.target.value })} /></div>
+                  <div><Label className="text-xs">Fim</Label><Input className="h-9 w-28" type="time" value={newBlock.end_time} onChange={(e) => setNewBlock({ ...newBlock, end_time: e.target.value })} /></div>
+                  <div><Label className="text-xs">Min</Label><Input className="h-9 w-20" type="number" value={newBlock.slot_minutes} onChange={(e) => setNewBlock({ ...newBlock, slot_minutes: +e.target.value })} /></div>
+                  <Button size="sm" variant="hero" onClick={addBlock}><Plus className="h-4 w-4" /></Button>
+                </div>
+                <div className="space-y-2 max-h-80 overflow-y-auto">
+                  {agendaBlocks.length === 0 ? <p className="text-sm text-muted-foreground text-center py-4">Sem horários definidos.</p> : agendaBlocks.map((b) => (
+                    <div key={b.id} className="flex items-center justify-between p-3 rounded-md border border-border/40">
+                      <div className="flex items-center gap-3"><Badge variant="secondary">{DAYS[b.day_of_week]}</Badge><span className="text-sm">{b.start_time.slice(0, 5)} – {b.end_time.slice(0, 5)} · {b.slot_minutes} min</span></div>
+                      <Button size="sm" variant="ghost" onClick={() => b.id && removeBlock(b.id)}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="locations" className="mt-6 space-y-3">

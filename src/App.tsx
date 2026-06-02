@@ -5,7 +5,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import Index from "./pages/Index";
-import Auth from "./pages/Auth";
+import LoginSelector from "./pages/LoginSelector";
+import PatientAuth from "./pages/auth/PatientAuth";
+import DoctorLogin from "./pages/auth/DoctorLogin";
 import ResetPassword from "./pages/ResetPassword";
 import Doctors from "./pages/Doctors";
 import DoctorProfile from "./pages/DoctorProfile";
@@ -27,7 +29,9 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/auth" element={<Auth />} />
+            <Route path="/auth" element={<LoginSelector />} />
+            <Route path="/login/paciente" element={<PatientAuth />} />
+            <Route path="/login/medico" element={<DoctorLogin />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/medicos" element={<Doctors />} />
             <Route path="/medicos/:id" element={<DoctorProfile />} />

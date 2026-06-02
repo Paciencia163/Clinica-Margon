@@ -56,6 +56,13 @@ export type Database = {
             referencedRelation: "doctors"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "appointments_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       availability: {

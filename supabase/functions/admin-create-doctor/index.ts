@@ -18,6 +18,11 @@ interface Payload {
   password: string;
   full_name: string;
   phone?: string;
+  bi?: string;
+  data_nascimento?: string;
+  provincia?: string;
+  cidade?: string;
+  endereco?: string;
   specialty: string;
   bio?: string;
   years_experience?: number;
@@ -61,18 +66,57 @@ Deno.serve(async (req) => {
     if (!body.email || !body.password || body.password.length < 8 || !body.full_name || !body.specialty) {
       return new Response(JSON.stringify({ error: "Email, password (min 8), nome e especialidade são obrigatórios" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    const availability = body.availability ?? [];
+    for (let i = 0; i < availability.length; i++) {
+      const slot = availability[i];
+      if (slot.start_time >= slot.end_time || slot.slot_minutes <= 0) {
+        return new Response(JSON.stringify({ error: "Horário de trabalho inválido" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const conflict = availability.find((other, index) =>
+        index !== i &&
+        other.day_of_week === slot.day_of_week &&
+        other.start_time < slot.end_time &&
+        other.end_time > slot.start_time,
+      );
+      if (conflict) {
+        return new Response(JSON.stringify({ error: "Conflito entre horários de trabalho do médico" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
 
     // 1. Create auth user (auto-confirmed)
     const { data: userRes, error: userErr } = await admin.auth.admin.createUser({
       email: body.email,
       password: body.password,
       email_confirm: true,
-      user_metadata: { full_name: body.full_name, phone: body.phone ?? null },
+      user_metadata: {
+        full_name: body.full_name,
+        phone: body.phone ?? null,
+        bi: body.bi ?? null,
+        data_nascimento: body.data_nascimento ?? null,
+        provincia: body.provincia ?? "Huíla",
+        cidade: body.cidade ?? "Lubango",
+        endereco: body.endereco ?? null,
+      },
     });
     if (userErr || !userRes.user) {
       return new Response(JSON.stringify({ error: userErr?.message ?? "Erro ao criar utilizador" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const newUserId = userRes.user.id;
+
+    const { error: profileErr } = await admin.from("profiles").upsert({
+      id: newUserId,
+      full_name: body.full_name,
+      phone: body.phone ?? null,
+      bi: body.bi ?? null,
+      data_nascimento: body.data_nascimento || null,
+      provincia: body.provincia ?? "Huíla",
+      cidade: body.cidade ?? "Lubango",
+      endereco: body.endereco ?? null,
+    });
+    if (profileErr) {
+      await admin.auth.admin.deleteUser(newUserId);
+      return new Response(JSON.stringify({ error: profileErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // 2. Assign 'medico' role (replace default 'paciente')
     await admin.from("user_roles").delete().eq("user_id", newUserId);
@@ -105,9 +149,13 @@ Deno.serve(async (req) => {
     }
 
     // 4. Insert availability blocks
-    if (body.availability && body.availability.length > 0) {
-      const rows = body.availability.map((a) => ({ ...a, doctor_id: doctorRow.id }));
-      await admin.from("availability").insert(rows);
+    if (availability.length > 0) {
+      const rows = availability.map((a) => ({ ...a, doctor_id: doctorRow.id }));
+      const { error: availabilityErr } = await admin.from("availability").insert(rows);
+      if (availabilityErr) {
+        await admin.auth.admin.deleteUser(newUserId);
+        return new Response(JSON.stringify({ error: availabilityErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     return new Response(JSON.stringify({ ok: true, doctor: doctorRow }), {

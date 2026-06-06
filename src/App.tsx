@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import LoginSelector from "./pages/LoginSelector";
 import PatientAuth from "./pages/auth/PatientAuth";
 import DoctorLogin from "./pages/auth/DoctorLogin";
+import AdminLogin from "./pages/auth/AdminLogin";
 import ResetPassword from "./pages/ResetPassword";
 import Doctors from "./pages/Doctors";
 import DoctorProfile from "./pages/DoctorProfile";
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/auth" element={<LoginSelector />} />
             <Route path="/login/paciente" element={<PatientAuth />} />
             <Route path="/login/medico" element={<DoctorLogin />} />
+            <Route path="/login/admin" element={<AdminLogin />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/medicos" element={<Doctors />} />
             <Route path="/medicos/:id" element={<DoctorProfile />} />

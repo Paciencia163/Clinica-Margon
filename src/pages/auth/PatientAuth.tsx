@@ -46,7 +46,7 @@ const PatientAuth = () => {
       if (mode === "signup") {
         const parsed = signupSchema.safeParse(form);
         if (!parsed.success) { toast.error(parsed.error.errors[0].message); return; }
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: parsed.data.email,
           password: parsed.data.password,
           options: {
@@ -63,13 +63,33 @@ const PatientAuth = () => {
           },
         });
         if (error) throw error;
+        if (data.user?.id && data.session) {
+          const { error: profileError } = await supabase.from("profiles").upsert({
+            id: data.user.id,
+            full_name: parsed.data.full_name,
+            phone: parsed.data.phone,
+            bi: parsed.data.bi,
+            data_nascimento: parsed.data.data_nascimento,
+            provincia: parsed.data.provincia,
+            cidade: parsed.data.cidade,
+            endereco: parsed.data.endereco,
+          });
+          if (profileError) throw profileError;
+        }
         toast.success("Conta criada com sucesso!");
         nav("/dashboard");
       } else if (mode === "login") {
         const parsed = loginSchema.safeParse(form);
         if (!parsed.success) { toast.error(parsed.error.errors[0].message); return; }
-        const { error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
+        const { data: signIn, error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
         if (error) throw error;
+        const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", signIn.user!.id);
+        const isReservedUser = (roles ?? []).some((r) => r.role === "medico" || r.role === "admin");
+        if (isReservedUser) {
+          await supabase.auth.signOut();
+          toast.error("Use a área reservada correta para esta conta.");
+          return;
+        }
         toast.success("Bem-vindo de volta!");
         nav("/dashboard");
       } else {

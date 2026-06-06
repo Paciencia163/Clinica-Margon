@@ -18,6 +18,7 @@ interface Appt {
   appointment_time: string;
   status: string;
   notes: string | null;
+  cancellation_reason: string | null;
   doctors: { full_name: string; specialty: string; consultation_price: number | null } | null;
 }
 
@@ -48,7 +49,15 @@ const PatientDashboard = () => {
   useEffect(() => { load(); }, [user]);
 
   const cancel = async (id: string) => {
-    const { error } = await supabase.from("appointments").update({ status: "cancelada" }).eq("id", id);
+    const reason = window.prompt("Motivo do cancelamento:");
+    if (reason === null) return;
+    if (!reason.trim()) return toast.error("Informe o motivo do cancelamento.");
+    const { error } = await supabase.from("appointments").update({
+      status: "cancelada",
+      cancellation_reason: reason.trim(),
+      cancelled_by: user?.id ?? null,
+      cancelled_at: new Date().toISOString(),
+    } as any).eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Consulta cancelada");
     load();
@@ -103,6 +112,7 @@ const PatientDashboard = () => {
           <div>
             <p className="font-semibold">{a.doctors?.full_name ?? "Médico"}</p>
             <p className="text-sm text-muted-foreground">{a.doctors?.specialty} · {format(parseISO(a.appointment_date), "PPP", { locale: pt })} às {a.appointment_time.slice(0, 5)}{a.doctors?.consultation_price ? ` · ${formatAOA(a.doctors.consultation_price)}` : ""}</p>
+            {a.status === "cancelada" && a.cancellation_reason && <p className="text-xs text-destructive mt-1">Motivo: {a.cancellation_reason}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2">

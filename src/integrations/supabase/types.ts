@@ -18,6 +18,9 @@ export type Database = {
         Row: {
           appointment_date: string
           appointment_time: string
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
           created_at: string
           doctor_id: string
           id: string
@@ -29,6 +32,9 @@ export type Database = {
         Insert: {
           appointment_date: string
           appointment_time: string
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           doctor_id: string
           id?: string
@@ -40,6 +46,9 @@ export type Database = {
         Update: {
           appointment_date?: string
           appointment_time?: string
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           doctor_id?: string
           id?: string
@@ -246,6 +255,33 @@ export type Database = {
           id?: string
           phone?: string | null
           provincia?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      specialties: {
+        Row: {
+          active: boolean
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
           updated_at?: string
         }
         Relationships: []

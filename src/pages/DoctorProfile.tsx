@@ -51,12 +51,22 @@ const DoctorProfile = () => {
   useEffect(() => {
     if (!id || !date) return;
     const day = format(date, "yyyy-MM-dd");
-    supabase.from("appointments")
+    const refresh = () => supabase.from("appointments")
       .select("appointment_time")
       .eq("doctor_id", id)
       .eq("appointment_date", day)
       .neq("status", "cancelada")
       .then(({ data }) => setTaken(new Set((data ?? []).map((a) => a.appointment_time.slice(0, 5)))));
+    refresh();
+    // Real-time: react to any new/changed booking for this doctor on this date
+    const channel = supabase
+      .channel(`appts-${id}-${day}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `doctor_id=eq.${id}` }, (payload: any) => {
+        const row = (payload.new ?? payload.old) as any;
+        if (row?.appointment_date === day) refresh();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [id, date]);
 
   const generateSlots = (): string[] => {
@@ -83,17 +93,34 @@ const DoctorProfile = () => {
     if (!user) { nav("/auth"); return; }
     if (!date || !id) return;
     setSubmitting(true);
+    const day = format(date, "yyyy-MM-dd");
+    // Real-time re-check right before insert
+    const { data: latest } = await supabase
+      .from("appointments")
+      .select("appointment_time")
+      .eq("doctor_id", id)
+      .eq("appointment_date", day)
+      .neq("status", "cancelada");
+    const latestTaken = new Set((latest ?? []).map((a) => a.appointment_time.slice(0, 5)));
+    if (latestTaken.has(time)) {
+      setTaken(latestTaken);
+      setSubmitting(false);
+      toast.error("Este horário acabou de ser reservado por outro paciente. Escolha outro.");
+      return;
+    }
     const { error } = await supabase.from("appointments").insert({
       patient_id: user.id,
       doctor_id: id,
-      appointment_date: format(date, "yyyy-MM-dd"),
+      appointment_date: day,
       appointment_time: `${time}:00`,
       status: "pendente",
     });
     setSubmitting(false);
     if (error) {
-      if (error.code === "23505") toast.error("Horário já reservado");
-      else toast.error(error.message);
+      if (error.code === "23505") {
+        setTaken((prev) => new Set(prev).add(time));
+        toast.error("Horário já reservado. A lista foi atualizada.");
+      } else toast.error(error.message);
       return;
     }
     toast.success(
@@ -187,7 +214,12 @@ const DoctorProfile = () => {
                 </div>
               </div>
               <div>
-                <p className="text-sm font-medium mb-3">2. Escolha o horário {date && <span className="text-muted-foreground">— {format(date, "PPP", { locale: pt })}</span>}</p>
+                <p className="text-sm font-medium mb-1">2. Escolha o horário {date && <span className="text-muted-foreground">— {format(date, "PPP", { locale: pt })}</span>}</p>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Fuso horário: <span className="font-medium">Africa/Luanda (GMT+1)</span>
+                  {availability[0]?.slot_minutes ? ` • Duração ${availability[0].slot_minutes} min` : ""}
+                  {slots.length > 0 && <> • <span className="text-secondary font-medium">{slots.filter((s) => !taken.has(s)).length} livres</span> de {slots.length}</>}
+                </p>
                 {slots.length === 0 ? (
                   <p className="text-sm text-muted-foreground p-4 bg-muted rounded-lg">Sem horários disponíveis para este dia.</p>
                 ) : (
@@ -195,7 +227,7 @@ const DoctorProfile = () => {
                     {slots.map((s) => {
                       const busy = taken.has(s);
                       return (
-                        <Button key={s} variant={busy ? "outline" : "soft"} size="sm" disabled={busy || submitting} onClick={() => book(s)} className={busy ? "opacity-40" : ""}>
+                        <Button key={s} variant={busy ? "outline" : "soft"} size="sm" disabled={busy || submitting} onClick={() => book(s)} className={busy ? "opacity-40 line-through" : ""} title={busy ? "Indisponível" : `Reservar ${s} (30 min)`}>
                           {s}
                         </Button>
                       );

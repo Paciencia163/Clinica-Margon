@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Plus, Edit, Trash2, Users, Stethoscope, Calendar, MapPin, Clock } from "lucide-react";
+import { Loader2, Plus, Edit, Trash2, Users, Stethoscope, Calendar, MapPin, Clock, Tag } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { formatAOA } from "@/lib/format";
@@ -20,8 +20,10 @@ interface Experience { name: string; url?: string; description?: string; }
 interface AvailBlock { id?: string; day_of_week: number; start_time: string; end_time: string; slot_minutes: number; }
 interface Doctor { id: string; full_name: string; specialty: string; bio: string | null; years_experience: number | null; photo_url: string | null; consultation_price: number | null; active: boolean; user_id: string | null; experiences?: Experience[] | null; }
 interface Location { id: string; name: string; provincia: string; municipio: string; bairro: string | null; endereco: string; phone: string | null; whatsapp: string | null; email: string | null; maps_url: string | null; opening_hours: string | null; is_main: boolean; active: boolean; }
+interface Specialty { id: string; name: string; description: string | null; active: boolean; }
 
 const DAYS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+const PROVINCIAS = ["Huíla", "Luanda", "Benguela", "Huambo", "Namibe", "Cunene", "Cuando Cubango", "Bié", "Moxico", "Malanje", "Kwanza Sul", "Kwanza Norte", "Uíge", "Zaire", "Cabinda", "Lunda Norte", "Lunda Sul", "Bengo"];
 const defaultAvail: AvailBlock[] = [
   { day_of_week: 1, start_time: "08:00", end_time: "12:00", slot_minutes: 30 },
   { day_of_week: 2, start_time: "08:00", end_time: "12:00", slot_minutes: 30 },
@@ -32,15 +34,26 @@ const defaultAvail: AvailBlock[] = [
 
 const empty = {
   email: "", password: "", phone: "",
+  bi: "", data_nascimento: "", provincia: "Huíla", cidade: "Lubango", endereco: "",
   full_name: "", specialty: "", bio: "", years_experience: 0, photo_url: "",
   consultation_price: 0, experiences: [] as Experience[], availability: defaultAvail,
 };
 const emptyLoc = { name: "", provincia: "Huíla", municipio: "Lubango", bairro: "", endereco: "", phone: "", whatsapp: "", email: "", maps_url: "", opening_hours: "", is_main: false };
 
+const findAvailabilityConflict = (blocks: AvailBlock[], candidate: AvailBlock, ignoreIndex = -1) =>
+  blocks.find((b, index) =>
+    index !== ignoreIndex &&
+    b.day_of_week === candidate.day_of_week &&
+    b.start_time < candidate.end_time &&
+    b.end_time > candidate.start_time,
+  );
+
 const AdminDashboard = () => {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [appts, setAppts] = useState<any[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+  const [newSpecialty, setNewSpecialty] = useState("");
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Doctor | null>(null);
   const [dialog, setDialog] = useState(false);
@@ -57,14 +70,16 @@ const AdminDashboard = () => {
   const [locForm, setLocForm] = useState(emptyLoc);
 
   const load = async () => {
-    const [{ data: d }, { data: a }, { data: l }] = await Promise.all([
+    const [{ data: d }, { data: a }, { data: l }, { data: s }] = await Promise.all([
       supabase.from("doctors").select("*").order("created_at", { ascending: false }),
       supabase.from("appointments").select("*, doctors(full_name, specialty), profiles!appointments_patient_id_fkey(full_name)").order("appointment_date", { ascending: false }).limit(50),
       supabase.from("clinic_locations").select("*").order("is_main", { ascending: false }),
+      (supabase as any).from("specialties").select("*").order("name"),
     ]);
     setDoctors((d as any) ?? []);
     setAppts(a ?? []);
     setLocations((l as any) ?? []);
+    setSpecialties((s as any) ?? []);
     setLoading(false);
   };
 
@@ -75,6 +90,7 @@ const AdminDashboard = () => {
     setEditing(d);
     setForm({
       email: "", password: "", phone: "",
+      bi: "", data_nascimento: "", provincia: "Huíla", cidade: "Lubango", endereco: "",
       full_name: d.full_name, specialty: d.specialty, bio: d.bio ?? "",
       years_experience: d.years_experience ?? 0, photo_url: d.photo_url ?? "",
       consultation_price: Number(d.consultation_price ?? 0),
@@ -86,6 +102,10 @@ const AdminDashboard = () => {
 
   const save = async () => {
     if (!form.full_name || !form.specialty) return toast.error("Nome e especialidade são obrigatórios");
+    const invalidTime = form.availability.find((a) => a.start_time >= a.end_time);
+    if (!editing && invalidTime) return toast.error("Cada horário deve ter início anterior ao fim");
+    const conflict = !editing && form.availability.find((a, index) => findAvailabilityConflict(form.availability, a, index));
+    if (conflict) return toast.error(`Conflito de horário em ${DAYS[conflict.day_of_week]} (${conflict.start_time}–${conflict.end_time})`);
     setSaving(true);
     try {
       if (editing) {
@@ -104,6 +124,8 @@ const AdminDashboard = () => {
         const { data, error } = await supabase.functions.invoke("admin-create-doctor", {
           body: {
             email: form.email, password: form.password, phone: form.phone || null,
+            bi: form.bi || null, data_nascimento: form.data_nascimento || null,
+            provincia: form.provincia, cidade: form.cidade, endereco: form.endereco || null,
             full_name: form.full_name, specialty: form.specialty, bio: form.bio || null,
             years_experience: form.years_experience, photo_url: form.photo_url || null,
             consultation_price: form.consultation_price,
@@ -142,6 +164,9 @@ const AdminDashboard = () => {
   };
   const addBlock = async () => {
     if (!agendaDoctor) return;
+    if (newBlock.start_time >= newBlock.end_time) return toast.error("A hora de início deve ser anterior à hora de fim.");
+    const conflict = findAvailabilityConflict(agendaBlocks, newBlock);
+    if (conflict) return toast.error(`Conflito com ${conflict.start_time.slice(0, 5)}–${conflict.end_time.slice(0, 5)} (${DAYS[conflict.day_of_week]}).`);
     const { error } = await supabase.from("availability").insert({ ...newBlock, doctor_id: agendaDoctor.id });
     if (error) return toast.error(error.message);
     toast.success("Bloco adicionado");
@@ -176,6 +201,25 @@ const AdminDashboard = () => {
     toast.success("Removido"); load();
   };
 
+  // ===== Specialties =====
+  const addSpecialty = async () => {
+    const name = newSpecialty.trim();
+    if (!name) return;
+    const { error } = await (supabase as any).from("specialties").insert({ name });
+    if (error) return toast.error(error.message);
+    setNewSpecialty("");
+    load();
+  };
+  const toggleSpecialty = async (sp: Specialty) => {
+    await (supabase as any).from("specialties").update({ active: !sp.active }).eq("id", sp.id);
+    load();
+  };
+  const removeSpecialty = async (id: string) => {
+    if (!confirm("Remover esta especialidade?")) return;
+    await (supabase as any).from("specialties").delete().eq("id", id);
+    load();
+  };
+
   return (
     <DashboardLayout title="Administração" subtitle="Gerencie médicos, agenda, locais e consultas">
       <div className="grid md:grid-cols-4 gap-4 mb-8">
@@ -188,6 +232,7 @@ const AdminDashboard = () => {
       <Tabs defaultValue="doctors">
         <TabsList>
           <TabsTrigger value="doctors">Médicos</TabsTrigger>
+          <TabsTrigger value="specialties">Especialidades</TabsTrigger>
           <TabsTrigger value="locations">Locais</TabsTrigger>
           <TabsTrigger value="appointments">Consultas</TabsTrigger>
         </TabsList>
@@ -217,9 +262,31 @@ const AdminDashboard = () => {
                     </div>
                   )}
 
+                  {!editing && (
+                    <div className="grid grid-cols-2 gap-3 p-4 bg-muted/40 rounded-md border border-border/40">
+                      <div className="col-span-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Dados pessoais do médico</div>
+                      <div><Label>BI</Label><Input value={form.bi} onChange={(e) => setForm({ ...form, bi: e.target.value })} placeholder="000000000LA000" /></div>
+                      <div><Label>Data de nascimento</Label><Input type="date" value={form.data_nascimento} onChange={(e) => setForm({ ...form, data_nascimento: e.target.value })} /></div>
+                      <div>
+                        <Label>Província</Label>
+                        <select className="h-10 w-full px-3 rounded-md border border-input bg-background text-sm" value={form.provincia} onChange={(e) => setForm({ ...form, provincia: e.target.value })}>
+                          {PROVINCIAS.map((p) => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </div>
+                      <div><Label>Município</Label><Input value={form.cidade} onChange={(e) => setForm({ ...form, cidade: e.target.value })} /></div>
+                      <div className="col-span-2"><Label>Endereço</Label><Input value={form.endereco} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Bairro, rua, nº…" /></div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2"><Label>Nome completo *</Label><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></div>
-                    <div><Label>Especialidade *</Label><Input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} /></div>
+                    <div>
+                      <Label>Especialidade *</Label>
+                      <select className="h-10 w-full px-3 rounded-md border border-input bg-background text-sm" value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })}>
+                        <option value="">— escolher —</option>
+                        {specialties.filter((s) => s.active).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
+                    </div>
                     <div><Label>Anos de experiência</Label><Input type="number" value={form.years_experience} onChange={(e) => setForm({ ...form, years_experience: +e.target.value })} /></div>
                     <div className="col-span-2"><Label>Preço da consulta (Kz / AOA)</Label><Input type="number" step="1" value={form.consultation_price} onChange={(e) => setForm({ ...form, consultation_price: +e.target.value })} /></div>
                   </div>
@@ -330,6 +397,29 @@ const AdminDashboard = () => {
               </div>
             </DialogContent>
           </Dialog>
+        </TabsContent>
+
+        <TabsContent value="specialties" className="mt-6 space-y-3">
+          <Card className="p-4">
+            <div className="flex gap-2">
+              <Input placeholder="Nome da especialidade (ex: Cardiologia)" value={newSpecialty} onChange={(e) => setNewSpecialty(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSpecialty()} />
+              <Button variant="hero" onClick={addSpecialty}><Plus className="h-4 w-4" /> Adicionar</Button>
+            </div>
+          </Card>
+          {specialties.length === 0 ? (
+            <Card className="p-8 text-center text-muted-foreground">Sem especialidades. Adicione a primeira.</Card>
+          ) : specialties.map((s) => (
+            <Card key={s.id} className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Tag className="h-4 w-4 text-secondary" />
+                <span className="font-medium">{s.name}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={s.active ? "default" : "outline"} className="cursor-pointer" onClick={() => toggleSpecialty(s)}>{s.active ? "Ativa" : "Inativa"}</Badge>
+                <Button size="sm" variant="ghost" onClick={() => removeSpecialty(s.id)}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            </Card>
+          ))}
         </TabsContent>
 
         <TabsContent value="locations" className="mt-6 space-y-3">

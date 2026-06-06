@@ -40,7 +40,16 @@ const DoctorDashboard = () => {
   useEffect(() => { load(); }, [user]);
 
   const setStatus = async (id: string, status: "pendente" | "confirmada" | "realizada" | "cancelada") => {
-    const { error } = await supabase.from("appointments").update({ status }).eq("id", id);
+    const patch: any = { status };
+    if (status === "cancelada") {
+      const reason = window.prompt("Motivo do cancelamento:");
+      if (reason === null) return;
+      if (!reason.trim()) return toast.error("Informe o motivo do cancelamento.");
+      patch.cancellation_reason = reason.trim();
+      patch.cancelled_by = user?.id ?? null;
+      patch.cancelled_at = new Date().toISOString();
+    }
+    const { error } = await supabase.from("appointments").update(patch).eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Atualizado");
     load();
@@ -48,6 +57,18 @@ const DoctorDashboard = () => {
 
   const addSlot = async () => {
     if (!doctorId) return;
+    if (newSlot.start_time >= newSlot.end_time) {
+      return toast.error("A hora de início deve ser anterior à hora de fim.");
+    }
+    const conflict = avail.find(
+      (s) =>
+        s.day_of_week === newSlot.day_of_week &&
+        s.start_time < newSlot.end_time &&
+        s.end_time > newSlot.start_time,
+    );
+    if (conflict) {
+      return toast.error(`Conflito com o bloco ${conflict.start_time.slice(0,5)}–${conflict.end_time.slice(0,5)} (${DAYS[conflict.day_of_week]}).`);
+    }
     const { error } = await supabase.from("availability").insert({ ...newSlot, doctor_id: doctorId });
     if (error) return toast.error(error.message);
     toast.success("Disponibilidade adicionada");
@@ -91,6 +112,7 @@ const DoctorDashboard = () => {
                   {format(parseISO(a.appointment_date), "PPP", { locale: pt })} às {a.appointment_time.slice(0, 5)}
                   {a.profiles?.phone && ` · ${a.profiles.phone}`}
                 </p>
+                {a.status === "cancelada" && a.cancellation_reason && <p className="text-xs text-destructive mt-1">Motivo: {a.cancellation_reason}</p>}
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant="outline">{a.status}</Badge>

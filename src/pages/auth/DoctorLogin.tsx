@@ -31,8 +31,15 @@ const DoctorLogin = () => {
       if (mode === "login") {
         const parsed = schema.safeParse(form);
         if (!parsed.success) { toast.error(parsed.error.errors[0].message); return; }
-        const { error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
+        const { data: signIn, error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
         if (error) throw error;
+        const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", signIn.user!.id);
+        const isDoctor = (roles ?? []).some((r) => r.role === "medico");
+        if (!isDoctor) {
+          await supabase.auth.signOut();
+          toast.error("Esta área é reservada apenas para médicos.");
+          return;
+        }
         toast.success("Bem-vindo, doutor(a)!");
         nav("/dashboard");
       } else {

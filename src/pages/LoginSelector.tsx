@@ -55,7 +55,27 @@ const LoginSelector = () => {
         </Card>
       </div>
 
-      <p className="mt-10 text-xs text-muted-foreground flex items-center gap-1">
+      <div className="mt-8 w-full max-w-3xl">
+        <Card
+          onClick={() => nav("/login/admin")}
+          className="p-5 cursor-pointer hover:shadow-elegant transition-smooth group border-2 border-dashed border-foreground/20 hover:border-foreground/60 flex items-center justify-between gap-4 bg-background/60"
+        >
+          <div className="flex items-center gap-4">
+            <div className="h-12 w-12 rounded-xl bg-foreground flex items-center justify-center shadow-card">
+              <ShieldCheck className="h-6 w-6 text-background" />
+            </div>
+            <div>
+              <h3 className="font-display text-lg font-bold">Área reservada — Administrador</h3>
+              <p className="text-xs text-muted-foreground">Acesso restrito à equipa de gestão da Clínica Margon.</p>
+            </div>
+          </div>
+          <span className="font-semibold text-sm flex items-center gap-1 group-hover:gap-2 transition-all">
+            Entrar <ArrowRight className="h-4 w-4" />
+          </span>
+        </Card>
+      </div>
+
+      <p className="mt-8 text-xs text-muted-foreground flex items-center gap-1">
         <ShieldCheck className="h-3 w-3" /> Ambiente seguro · dados protegidos
       </p>
     </div>

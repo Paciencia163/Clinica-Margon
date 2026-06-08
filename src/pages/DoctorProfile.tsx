@@ -10,7 +10,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { toast } from "sonner";
-import { Loader2, Award, Clock, Coins, ArrowLeft, Building2 } from "lucide-react";
+import { Loader2, Award, Clock, Coins, ArrowLeft, Building2, Globe, CalendarDays } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { format, getDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { formatAOA } from "@/lib/format";
@@ -37,6 +38,7 @@ const DoctorProfile = () => {
   const [taken, setTaken] = useState<Set<string>>(new Set());
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [submitting, setSubmitting] = useState(false);
+  const [pendingTime, setPendingTime] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -129,6 +131,7 @@ const DoctorProfile = () => {
         : "Consulta marcada com sucesso!"
     );
     setTaken((prev) => new Set(prev).add(time));
+    setPendingTime(null);
   };
 
   if (!doctor) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -218,6 +221,7 @@ const DoctorProfile = () => {
                 <p className="text-xs text-muted-foreground mb-3">
                   Fuso horário: <span className="font-medium">Africa/Luanda (GMT+1)</span>
                   {availability[0]?.slot_minutes ? ` • Duração ${availability[0].slot_minutes} min` : ""}
+                  {doctor.consultation_price ? <> • Valor <span className="font-medium text-foreground">{formatAOA(doctor.consultation_price)}</span></> : null}
                   {slots.length > 0 && <> • <span className="text-secondary font-medium">{slots.filter((s) => !taken.has(s)).length} livres</span> de {slots.length}</>}
                 </p>
                 {slots.length === 0 ? (
@@ -226,8 +230,10 @@ const DoctorProfile = () => {
                   <div className="grid grid-cols-3 gap-2">
                     {slots.map((s) => {
                       const busy = taken.has(s);
+                      const dur = availability[0]?.slot_minutes ?? 30;
+                      const priceTxt = doctor.consultation_price ? ` • ${formatAOA(doctor.consultation_price)}` : "";
                       return (
-                        <Button key={s} variant={busy ? "outline" : "soft"} size="sm" disabled={busy || submitting} onClick={() => book(s)} className={busy ? "opacity-40 line-through" : ""} title={busy ? "Indisponível" : `Reservar ${s} (30 min)`}>
+                        <Button key={s} variant={busy ? "outline" : "soft"} size="sm" disabled={busy || submitting} onClick={() => { if (!user) { nav("/auth"); return; } setPendingTime(s); }} className={busy ? "opacity-40 line-through" : ""} title={busy ? "Indisponível" : `Reservar ${s} (${dur} min${priceTxt})`}>
                           {s}
                         </Button>
                       );
@@ -240,6 +246,43 @@ const DoctorProfile = () => {
           </Card>
         </div>
       </div>
+
+      <AlertDialog open={!!pendingTime} onOpenChange={(o) => { if (!o) setPendingTime(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar marcação</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-2 text-sm text-foreground">
+                <div className="flex items-start gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={doctor.photo_url ?? undefined} />
+                    <AvatarFallback>{doctor.full_name.split(" ").map((n) => n[0]).slice(0, 2).join("")}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-semibold">{doctor.full_name}</p>
+                    <p className="text-xs text-muted-foreground">{doctor.specialty}</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/40 p-3 space-y-2">
+                  <div className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-secondary" /> {date && format(date, "PPP", { locale: pt })} às <span className="font-semibold">{pendingTime}</span></div>
+                  <div className="flex items-center gap-2"><Clock className="h-4 w-4 text-secondary" /> Duração: <span className="font-medium">{availability[0]?.slot_minutes ?? 30} min</span></div>
+                  <div className="flex items-center gap-2"><Coins className="h-4 w-4 text-secondary" /> Valor: <span className="font-medium">{doctor.consultation_price ? formatAOA(doctor.consultation_price) : "A combinar"}</span></div>
+                  <div className="flex items-center gap-2"><Globe className="h-4 w-4 text-secondary" /> Fuso horário: <span className="font-medium">Africa/Luanda (GMT+1)</span></div>
+                </div>
+                <p className="text-xs text-muted-foreground">Reveja os dados antes de confirmar. A marcação ficará pendente de validação.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submitting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction disabled={submitting} onClick={(e) => { e.preventDefault(); if (pendingTime) book(pendingTime); }}>
+              {submitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />A confirmar...</> : "Confirmar marcação"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+
       <Footer />
     </div>
   );

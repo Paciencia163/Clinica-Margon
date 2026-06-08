@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Link } from "react-router-dom";
-import { Search, ArrowRight, Loader2, CalendarIcon, X } from "lucide-react";
+import { Search, ArrowRight, Loader2, CalendarIcon, X, Clock, Coins } from "lucide-react";
 import { format, getDay } from "date-fns";
+import { formatAOA } from "@/lib/format";
 import { pt } from "date-fns/locale";
 
 interface Doctor {
@@ -71,9 +72,21 @@ const Doctors = () => {
       .then(({ data }) => setAppointments(data ?? []));
   }, [date]);
 
-  const availableDoctorIds = useMemo(() => {
+  const doctorStats = useMemo(() => {
+    // Map<doctorId, { freeCount, totalCount, slotMinutes }>
+    const stats = new Map<string, { freeCount: number; totalCount: number; slotMinutes: number | null }>();
     if (!date) {
-      return new Set(availability.map((a) => a.doctor_id));
+      const byDoc = new Map<string, Slot[]>();
+      availability.forEach((s) => {
+        const list = byDoc.get(s.doctor_id) ?? [];
+        list.push(s);
+        byDoc.set(s.doctor_id, list);
+      });
+      byDoc.forEach((slots, docId) => {
+        const total = slots.reduce((acc, s) => acc + countSlots(s), 0);
+        stats.set(docId, { freeCount: total, totalCount: total, slotMinutes: slots[0]?.slot_minutes ?? null });
+      });
+      return stats;
     }
     const dow = getDay(date);
     const todays = availability.filter((a) => a.day_of_week === dow);
@@ -83,7 +96,6 @@ const Doctors = () => {
       set.add(ap.appointment_time.slice(0, 5));
       taken.set(ap.doctor_id, set);
     });
-    const free = new Set<string>();
     const byDoc = new Map<string, Slot[]>();
     todays.forEach((s) => {
       const list = byDoc.get(s.doctor_id) ?? [];
@@ -107,13 +119,16 @@ const Doctors = () => {
           cur += s.slot_minutes;
         }
       });
-      if (totalSlots > busy) free.add(docId);
+      const free = totalSlots - busy;
+      if (free > 0) stats.set(docId, { freeCount: free, totalCount: totalSlots, slotMinutes: slots[0]?.slot_minutes ?? null });
     });
-    return free;
+    return stats;
   }, [date, availability, appointments]);
 
+  const availableDoctorIds = useMemo(() => new Set(doctorStats.keys()), [doctorStats]);
+
   const visibleDoctors = doctors.filter((d) => availableDoctorIds.has(d.id));
-  const specialties = Array.from(new Set(visibleDoctors.map((d) => d.specialty)));
+  const specialties = Array.from(new Set(doctors.map((d) => d.specialty))).sort();
   const filtered = visibleDoctors.filter(
     (d) =>
       (spec === "all" || d.specialty === spec) &&
@@ -236,7 +251,9 @@ const Doctors = () => {
           </Card>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filtered.map((d) => (
+            {filtered.map((d) => {
+              const st = doctorStats.get(d.id);
+              return (
               <Card key={d.id} className="p-6 hover:shadow-elegant transition-smooth hover:-translate-y-1">
                 <div className="flex items-start gap-4">
                   <Avatar className="h-16 w-16 ring-2 ring-accent/30">
@@ -251,6 +268,20 @@ const Doctors = () => {
                   </div>
                 </div>
                 {d.bio && <p className="text-sm text-muted-foreground mt-4 line-clamp-2">{d.bio}</p>}
+                <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {st?.slotMinutes ? (
+                    <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3 text-secondary" /> {st.slotMinutes} min / consulta</span>
+                  ) : null}
+                  {d.consultation_price ? (
+                    <span className="inline-flex items-center gap-1"><Coins className="h-3 w-3 text-secondary" /> {formatAOA(d.consultation_price)}</span>
+                  ) : null}
+                  {st && (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="text-secondary font-medium">{st.freeCount}</span>
+                      {date ? ` vagas livres` : ` horários/semana`}{st.totalCount !== st.freeCount ? ` de ${st.totalCount}` : ""}
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center justify-between mt-5 pt-4 border-t border-border/40">
                   <div className="text-xs text-muted-foreground">
                     {d.years_experience ? `${d.years_experience} anos exp.` : "Especialista"}
@@ -260,7 +291,8 @@ const Doctors = () => {
                   </Button>
                 </div>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
